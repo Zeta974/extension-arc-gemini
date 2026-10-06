@@ -232,6 +232,8 @@
       mediaRecorder.onerror=()=>stopRecording(); mediaRecorder.start(120); monitorVoice();
     }catch(error){
       mediaStream?.getTracks?.().forEach(t=>t.stop()); mediaStream=null; mediaRecorder=null; setMicState(false,"micro refusé"); setStatus("Prêt");
+      // Extension popups (PDF mode) can't show the mic permission prompt: grant it once from a tab.
+      if(error?.name==="NotAllowedError"&&location.protocol==="chrome-extension:"){addMessage("model","🎙 La popup ne peut pas demander le micro. Un onglet s’ouvre pour l’autoriser une fois, puis rouvre Gemini sur le PDF.");setTimeout(()=>chrome.tabs.create({url:chrome.runtime.getURL("mic.html")}),900);return;}
       const msg=error?.name==="NotAllowedError"?"Le micro est refusé. Autorise le microphone pour Arc puis réessaie.":error?.message||"Impossible d’accéder au micro.";
       addMessage("model",`🎙 ${esc(msg)}`);
     }
