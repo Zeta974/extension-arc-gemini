@@ -30,7 +30,7 @@ async function ensureContent(tabId) {
   const ping = await sendToTab(tabId, { type: "PING" });
   if (ping?.ok) return true;
   try {
-    await chrome.scripting.executeScript({ target: { tabId, allFrames: false }, files: ["content.js"] });
+    await chrome.scripting.executeScript({ target: { tabId, allFrames: false }, files: ["vendor/katex/katex.min.js", "content.js"] });
     return true;
   } catch (error) {
     console.warn("[Gemini Screen] injection failed", error);
@@ -342,7 +342,7 @@ async function streamGemini({ tabId, requestId, apiKey, model, contents, popupTa
     method: "POST",
     headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
     body: JSON.stringify({
-      system_instruction: { parts: [{ text: "Tu es l’assistant visuel rapide d’une extension Arc. Réponds en français sauf si l’utilisateur utilise principalement une autre langue. Va droit au but. Analyse les images jointes au dernier message. Les anciennes captures ne sont pas renvoyées automatiquement : ne prétends pas revoir leurs pixels si elles ne sont pas jointes. L’historique texte du chat courant est conservé pour le contexte. N’invente jamais ce qui n’est pas lisible ou déductible de l’image." }] },
+      system_instruction: { parts: [{ text: "Tu es l’assistant visuel rapide d’une extension Arc. Réponds en français sauf si l’utilisateur utilise principalement une autre langue. Va droit au but. Analyse les images jointes au dernier message. Les anciennes captures ne sont pas renvoyées automatiquement : ne prétends pas revoir leurs pixels si elles ne sont pas jointes. L’historique texte du chat courant est conservé pour le contexte. N’invente jamais ce qui n’est pas lisible ou déductible de l’image. Pour les maths, utilise LaTeX : $...$ en ligne, $$...$$ en bloc." }] },
       contents,
       generationConfig: { temperature: 0.2, maxOutputTokens: 2048 }
     })

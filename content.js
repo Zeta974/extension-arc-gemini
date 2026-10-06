@@ -87,15 +87,43 @@
     return bubble;
   }
 
+  // KaTeX is bundled locally (MV3 forbids remote code). Fonts must be declared on the
+  // document because @font-face inside a shadow root is ignored; the rest goes in the shadow.
+  let katexCss = null;
+  async function injectKatexCss(root) {
+    try {
+      if (katexCss === null) {
+        const base = chrome.runtime.getURL("vendor/katex/");
+        katexCss = (await (await fetch(`${base}katex.min.css`)).text()).replaceAll("url(fonts/", `url(${base}fonts/`);
+      }
+      if (!document.getElementById("__gemini_screen_katex_fonts__")) {
+        const fonts = document.createElement("style"); fonts.id = "__gemini_screen_katex_fonts__";
+        fonts.textContent = (katexCss.match(/@font-face\{[^}]*\}/g) || []).join("");
+        (document.head || document.documentElement).appendChild(fonts);
+      }
+      const s = document.createElement("style"); s.textContent = katexCss.replace(/@font-face\{[^}]*\}/g, ""); root.appendChild(s);
+    } catch (_) {}
+  }
+
+  const unesc = (v) => v.replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&quot;", '"').replaceAll("&#039;", "'").replaceAll("&amp;", "&");
+  function renderMath(tex, displayMode) {
+    if (typeof katex === "undefined") return null;
+    try { return katex.renderToString(unesc(tex).trim(), {displayMode, throwOnError:false, output:"html"}); } catch (_) { return null; }
+  }
+
   function renderMarkdown(text) {
     let html = esc(text);
     const blocks = [];
-    html = html.replace(/```([\w+-]*)\n?([\s\S]*?)```/g, (_, lang, code) => {
-      const b = `<pre><code>${lang ? `<div style="color:#8f9097;font-size:8px;margin-bottom:4px">${esc(lang)}</div>` : ""}${code}</code></pre>`;
-      const token = `@@BLOCK_${blocks.length}@@`; blocks.push(b); return token;
-    });
+    const stash = (b) => { const token = `@@BLOCK_${blocks.length}@@`; blocks.push(b); return token; };
+    html = html.replace(/```([\w+-]*)\n?([\s\S]*?)```/g, (_, lang, code) =>
+      stash(`<pre><code>${lang ? `<div style="color:#8f9097;font-size:8px;margin-bottom:4px">${esc(lang)}</div>` : ""}${code}</code></pre>`));
+    html = html.replace(/`([^`]+)`/g, (_, code) => stash(`<code>${code}</code>`));
+    const math = (display) => (m, tex) => { const r = renderMath(tex, display); return r ? stash(r) : m; };
+    html = html.replace(/\$\$([\s\S]+?)\$\$/g, math(true));
+    html = html.replace(/\\\[([\s\S]+?)\\\]/g, math(true));
+    html = html.replace(/\\\(([\s\S]+?)\\\)/g, math(false));
+    html = html.replace(/(^|[^\\$\w])\$(?!\s)([^$\n]+?)(?<!\s)\$(?!\d)/g, (m, pre, tex) => { const r = renderMath(tex, false); return r ? pre + stash(r) : m; });
     html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
-    html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
     html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
     html = html.replace(/__([^_]+)__/g, "<strong>$1</strong>");
     html = html.replace(/(^|\n)- (.*)/g, "$1• $2");
@@ -204,6 +232,8 @@
       mediaRecorder.onerror=()=>stopRecording(); mediaRecorder.start(120); monitorVoice();
     }catch(error){
       mediaStream?.getTracks?.().forEach(t=>t.stop()); mediaStream=null; mediaRecorder=null; setMicState(false,"micro refusé"); setStatus("Prêt");
+      // Extension popups (PDF mode) can't show the mic permission prompt: grant it once from a tab.
+      if(error?.name==="NotAllowedError"&&location.protocol==="chrome-extension:"){addMessage("model","🎙 La popup ne peut pas demander le micro. Un onglet s’ouvre pour l’autoriser une fois, puis rouvre Gemini sur le PDF.");setTimeout(()=>chrome.tabs.create({url:chrome.runtime.getURL("mic.html")}),900);return;}
       const msg=error?.name==="NotAllowedError"?"Le micro est refusé. Autorise le microphone pour Arc puis réessaie.":error?.message||"Impossible d’accéder au micro.";
       addMessage("model",`🎙 ${esc(msg)}`);
     }
@@ -214,7 +244,8 @@
     const style=document.createElement("style"); style.textContent=`
       :host{all:initial}*{box-sizing:border-box}.gemini-root{position:fixed;z-index:2147483647;left:14px;top:50%;transform:translateY(-50%);width:20vw;min-width:320px;max-width:420px;height:50vh;min-height:390px;max-height:680px;color:#f2f2f3;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.panel{width:100%;height:100%;overflow:hidden;display:flex;flex-direction:column;color-scheme:dark;background:rgba(20,21,25,.97);border:1px solid rgba(255,255,255,.12);border-radius:16px;box-shadow:0 24px 80px rgba(0,0,0,.45),0 4px 16px rgba(0,0,0,.25);backdrop-filter:blur(18px)}button,textarea{font:inherit}button{color:inherit}.topbar{flex:0 0 48px;display:flex;align-items:center;justify-content:space-between;padding:8px 10px 8px 12px;border-bottom:1px solid rgba(255,255,255,.08)}.brand{display:flex;align-items:center;gap:8px}.mark{width:26px;height:26px;display:grid;place-items:center;border-radius:8px;background:rgba(200,166,255,.13);font-size:14px}.title{font-size:12px;font-weight:750}.status{margin-top:2px;color:#96979f;font-size:9px;max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.actions{display:flex;gap:2px}.icon{width:28px;height:28px;display:grid;place-items:center;border:0;border-radius:8px;background:transparent;color:#9fa0a7;cursor:pointer}.icon:hover{background:rgba(255,255,255,.07);color:#fff}.captureBar{padding:7px 9px 8px;border-bottom:1px solid rgba(255,255,255,.08)}.captureHead{display:flex;align-items:center;justify-content:space-between}.label{font-size:9px;text-transform:uppercase;letter-spacing:.08em;font-weight:750;color:#85868e}.capture{border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.045);border-radius:8px;padding:5px 7px;font-size:9px;cursor:pointer}.rail{display:flex;gap:6px;overflow-x:auto;margin-top:6px}.empty{color:#74757d;font-size:9px;padding:6px 2px}.thumb{position:relative;flex:0 0 74px;height:48px;border-radius:7px;overflow:hidden;border:1px solid rgba(255,255,255,.09)}.thumb img{width:100%;height:100%;object-fit:cover;display:block}.badge{position:absolute;left:4px;top:4px;padding:2px 4px;border-radius:4px;background:rgba(0,0,0,.66);font-size:7px}.stamp{position:absolute;right:4px;bottom:3px;font-size:6px;color:#ddd;text-shadow:0 1px 2px #000}.reuse{position:absolute;right:4px;top:4px;padding:2px 4px;border:0;border-radius:4px;background:rgba(0,0,0,.72);font-size:7px;opacity:0;cursor:pointer}.thumb:hover .reuse{opacity:1}.pending{box-shadow:0 0 0 1px rgba(200,166,255,.5)}.chat{flex:1;min-height:0;overflow:auto;padding:10px}.welcome{color:#85868e;text-align:center;padding:18px 8px;font-size:10px;line-height:1.5}.welcome strong{color:#f2f2f3}.msg{display:flex;margin-bottom:9px}.msg.user{justify-content:flex-end}.bubble{max-width:92%;padding:8px 9px;border-radius:11px;border:1px solid rgba(255,255,255,.08);font-size:11px;line-height:1.45;overflow-wrap:anywhere}.userBubble{background:#292c33;border-bottom-right-radius:4px}.modelBubble{border-color:transparent;padding:8px 2px}.markdown p{margin:0 0 6px}.markdown p:last-child{margin-bottom:0}.markdown pre{margin:7px 0 0;padding:7px;border-radius:8px;background:#0b0c0e;border:1px solid rgba(255,255,255,.08);overflow:auto}.markdown code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:9px}.markdown :not(pre)>code{padding:1px 3px;border-radius:4px;background:rgba(255,255,255,.09)}.markdown a{color:#c8a6ff}.composerArea{padding:7px 9px 8px;border-top:1px solid rgba(255,255,255,.08);background:rgba(17,18,20,.95)}.footer{min-height:12px;padding:2px 2px 4px;color:#66676f;font-size:8px;display:flex;justify-content:space-between}.composer{display:flex;gap:4px;align-items:flex-end;min-height:38px;padding:4px;border:1px solid rgba(255,255,255,.13);border-radius:11px;background:#17181b}.composer textarea{flex:1;min-height:28px;max-height:100px;resize:none;border:0;outline:0;color:#f2f2f3;background:transparent;padding:5px 6px;font-size:11px;line-height:1.35;user-select:text;-webkit-user-select:text}.composer textarea::placeholder{color:#6f7077}.mic,.send{flex:0 0 29px;height:29px;border:0;border-radius:8px;cursor:pointer}.mic{background:transparent;color:#9fa0a7}.send{background:#c8a6ff;color:#19141f;font-weight:850}.send:disabled{opacity:.42;cursor:not-allowed}.thinking{display:inline-flex;gap:3px;align-items:center;color:#8d8e95}.dot{width:3px;height:3px;border-radius:50%;background:currentColor;animation:blink 1.1s infinite}.dot:nth-child(2){animation-delay:.15s}.dot:nth-child(3){animation-delay:.3s}@keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}@media(max-width:700px){.gemini-root{width:82vw;max-width:380px;min-width:280px;left:8px}}
       ${location.protocol === "chrome-extension:" ? `.gemini-root{position:relative;left:0;top:0;transform:none;width:100%;min-width:0;max-width:none;height:100%;min-height:0;max-height:none}.panel{border:1px solid rgba(255,255,255,.12);border-radius:16px;box-shadow:0 24px 80px rgba(0,0,0,.45),0 4px 16px rgba(0,0,0,.25);backdrop-filter:blur(18px)}.chat{padding:10px}` : ""}
-    `; shadow.appendChild(style);
+    .markdown .katex{font-size:1.1em}.markdown .katex-display{margin:6px 0;overflow-x:auto;overflow-y:hidden}
+    `; shadow.appendChild(style); void injectKatexCss(shadow);
     const shell=document.createElement("div"); shell.className="gemini-root"; shell.innerHTML=`<div class="panel"><div class="topbar"><div class="brand"><div class="mark">✦</div><div><div class="title">Gemini Screen</div><div class="status" id="status">Prêt</div></div></div><div class="actions"><button class="icon" id="new" title="Nouvelle conversation">＋</button><button class="icon" id="settings" title="Paramètres">⚙</button><button class="icon" id="close" title="Fermer">×</button></div></div><div class="captureBar"><div class="captureHead"><div class="label">Captures</div><button class="capture" id="capture">↻ Refaire</button></div><div class="rail" id="rail"><div class="empty">Capture automatique…</div></div></div><div class="chat" id="chat"></div><div class="composerArea"><div class="footer"><span id="micStatus"></span><span>Ctrl+Entrée · 🎙 pour parler</span></div><div class="composer"><button class="mic" id="mic" title="Dicter">🎙</button><textarea id="input" rows="1" placeholder="Une question sur cet écran…"></textarea><button class="send" id="send" title="Envoyer">➤</button></div></div></div>`;
     shadow.appendChild(shell); document.documentElement.appendChild(overlay);
 
