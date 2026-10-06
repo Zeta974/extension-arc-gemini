@@ -21,6 +21,7 @@
         "https://*/*"
       ],
       "js": [
+        "vendor/katex/katex.min.js",
         "content.js"
       ],
       "run_at": "document_start",
@@ -56,5 +57,16 @@
   "options_ui": {
     "page": "settings.html",
     "open_in_tab": true
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "vendor/katex/katex.min.css",
+        "vendor/katex/fonts/*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
 }
